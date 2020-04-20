@@ -26,14 +26,14 @@ library(maptools) #produce maps using GIS layers
 Import the masterDF
 ```{r}
 masterDF1 <- read_csv("~/Dropbox/Zooniverse_work/Kate/masterDF.csv")
-masterDF <- read_csv("~/Documents/Kate_ThesisCode/dataFinal.csv")
+masterDF <- read_csv("/Users/ebar/Dropbox/R/Zooniverse_work/Kate/data/dataFinal.csv")
 #dataFinal.csv is "joinedData.csv" that was manually cleaned, removing all subjects that we did not want to count (from cameras that misfired or malfunctioned, etc). "dataFinal.csv" also has the actual dates of deployment, shown in the 'Use_End_Date' column based on the notes from "Came_Use_Date.csv"
 
 ```
 
 Source functions from Wild.ID chapters in console
 ```{r}
-source('~/Dropbox/Zooniverse_work/Camera_Trapping_Ch5_Work/TEAM library 1.7.R')
+source('/Users/ebar/Dropbox/R/Zooniverse_work/Camera_Trapping_Ch5_Work/TEAM library 1.7.R')
 ```
 
 Calculate camera trap nights
@@ -52,7 +52,7 @@ New<-select(masterDF, "subject_ids", "diff_species", "choice", "Imj1", "CamNum",
 
 Now we need to bring in the photo dates, because the functions we are using come from the Wild.ID format "Chapter 5" business. They require photo date and time, which we will distinguish as "td.photo", "Photo.Date", and "Photo.Time". To get photo date and time, you have to generate a csv file of all of the images you uploaded to Zooniverse. Use the Terminal to generate a csv of the photo metadata and there should be a column titled "DateTimeOriginal". From that output csv, you only need the columns "FileName" and "DateTimeOriginal". Now we can join the photo dates and times to our masterDF
 ```{r}
-PhotoDatesTimes <- read_csv("~/Documents/Kate_ThesisCode/PhotoDatesTimes.csv") #This is the df generated from the Terminal and then cut down to have just the necessary columns.
+PhotoDatesTimes <- read_csv("/Users/ebar/Dropbox/R/Zooniverse_work/Kate/data/PhotoDatesTimes.csv") #This is the df generated from the Terminal and then cut down to have just the necessary columns.
 
 #Need to carry round # over with you when you join!
 dfPrep<-left_join(New, PhotoDatesTimes, by=c("Imj1"="FileName", "round"="Round"), type='right', match='all')
@@ -112,8 +112,7 @@ Species Accumulation
 accumulation<-acc.curve(masterDF, 2019.01)
 accumulation<-acc.curve(SpeciesAcc, 2020.1)
 accumulationWinter<-acc.curve(SpeciesAccWinter, 2020.1)
-
-#There is a problem in this code that counts each photo as a camera trapping day.
+ #CODE CRASHES HERE
 ```
 
 Plot Species Accumulation Curve
