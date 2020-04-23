@@ -2,9 +2,8 @@
 title: "Species Accumulation Curve"
 output: html_notebook
 ---
-Species accumulation curve can indicate if we deployed an adequate sampling effort.
+Using modifications of code from Camera Trapping for Wildlife Research (**CTFWR**) to get summary stats and the Species accumulation curve to indicate whether we deployed an adequate sampling effort.
 
-Use this code to calculate species accumulation curve. 
 
 Load necessary packages and clear the environment
 ```{r}
@@ -25,9 +24,12 @@ library(maptools) #produce maps using GIS layers
 
 Import the masterDF
 ```{r}
-masterDF1 <- read_csv("~/Dropbox/Zooniverse_work/Kate/masterDF.csv")
+last_yearDF <- read_csv("/Users/ebar/Dropbox/R/Zooniverse_work/Kate/masterDF.csv")
+#last_yearDF is the DF from when we did this work in 2018-2019 for comparison.
+
+
 masterDF <- read_csv("/Users/ebar/Dropbox/R/Zooniverse_work/Kate/data/dataFinal.csv")
-#dataFinal.csv is "joinedData.csv" that was manually cleaned, removing all subjects that we did not want to count (from cameras that misfired or malfunctioned, etc). "dataFinal.csv" also has the actual dates of deployment, shown in the 'Use_End_Date' column based on the notes from "Came_Use_Date.csv"
+#dataFinal.csv is "joinedData.csv" that was manually cleaned, removing all subjects that we did not want to count (from cameras that misfired or malfunctioned, etc). "dataFinal.csv" also has the actual dates of deployment, shown in the 'Use_End_Date' column based on the notes from "Came_Use_Date.csv". 
 
 ```
 
@@ -35,6 +37,170 @@ Source functions from Wild.ID chapters in console
 ```{r}
 source('/Users/ebar/Dropbox/R/Zooniverse_work/Camera_Trapping_Ch5_Work/TEAM library 1.7.R')
 ```
+### Summary stats from masterDF
+pp. 55 and 55 of CTFWR 
+Change the names of the columns to match that which Wild.ID requires. 
+
+```{r}
+all_species<-unique(masterDF$choice)
+all_species
+num_species<-length(all_species)
+```
+
+Add a column to identify each camera trap actual camera trap by extracting the camera trap, card number and forest information from each image name.
+Requires package `stringr`
+
+```{r}
+library(stringr)
+masterDF$Sampling.Unit.Name<-str_sub(masterDF$Imj1, start = 1, end = 9) #use 9 because some forests have a 3 letter rather than 2 letter code.
+```
+Now add a sampling year (the whole data set). We can think of sampling event as equal to round.
+```{r}
+masterDF$Sampling.Year<-"19_20"
+```
+Let's check how many camera traps we have records for in the database using Sampling.Unit.Name
+```{r}
+unique(masterDF$Sampling.Unit.Name)
+```
+How many is that?
+```{r}
+length(unique(masterDF$Sampling.Unit.Name))
+```
+74 cameras for which there are records.
+ 
+Now we need to bring in the photo dates, because the functions we are using come from the Wild.ID format "Chapter 5" business. They require photo date and time, which we will distinguish as "td.photo", "Photo.Date", and "Photo.Time". To get photo date and time, you have to generate a csv file of all of the images you uploaded to Zooniverse. Use the Terminal to generate a csv of the photo metadata and there should be a column titled "DateTimeOriginal". From that output csv, you only need the columns "FileName" and "DateTimeOriginal". Now we can join the photo dates and times to our masterDF
+```{r}
+PhotoDatesTimes <- read_csv("/Users/ebar/Dropbox/R/Zooniverse_work/Kate/data/PhotoDatesTimes.csv") #This is the df generated from the Terminal and then cut down to have just the necessary columns.
+
+#Need to carry round # over with you when you join!
+masterDF<-left_join(masterDF, PhotoDatesTimes, by=c("Imj1"="FileName", "round"="Round"), type='right', match='all')
+
+```
+Convert Date_Out, Date_Checked and Use_End_Date to date format with lubridate.
+
+```{r}
+masterDF$Date_Out<-mdy(masterDF$Date_Out)
+masterDF$Date_Checked<-mdy(masterDF$Date_Checked)
+masterDF$Use_End_Date<-mdy(masterDF$Use_End_Date)
+```
+
+Separate out photo dates and times into different columns. Maintain one column with both dates and times together. 
+```{r}
+masterDF$Photo.Time <- format(as.POSIXct(masterDF$DateTimeOriginal,format="%Y:%m:%d %H:%M:%S"),"%H:%M:%S")
+
+masterDF$Photo.Date <- format(as.POSIXct(masterDF$DateTimeOriginal,format="%Y:%m:%d %H:%M:%S"),"%m/%d/%Y")
+```
+Let's look at start dates/times
+```{r}
+unique(masterDF$Date_Out)
+```
+Notice a couple of typos: 2008-02-07 should be 2019-02-07. Fix that.
+
+```{r}
+fix_dates<-which(masterDF$Date_Out == "2008-02-07")
+masterDF$Date_Out[fix_dates]<-"2019-02-07"
+unique(masterDF$Date_Out)
+```
+
+
+### Deriving sampling effort, events and species list.
+Section 5.5.3 of CTFWR.
+
+Survey effort is measured as camera days.
+
+Try with own code first, then CTFWR code.
+
+Select just the first row of each camera deplyment from masterDF.
+```{r}
+cam_days<-masterDF %>% group_by(Sampling.Unit.Name) %>% 
+  arrange(Sampling.Unit.Name) %>% slice(1)
+```
+Now reduce to just the needed vars:
+```{r}
+cam_days<-select(cam_days, Sampling.Unit.Name, Sampling.Year,round, Date_Out, Date_Checked,Use_End_Date)
+```
+Now calculate camera days. 
+```{r}
+cam_days$CamDays<- (int_length(interval(cam_days$Date_Out, cam_days$Use_End_Date)))/86400
+```
+
+Now let's visual camera days
+```{r}
+ggplot(cam_days, aes(CamDays))+
+        geom_histogram()
+```
+And some summary statistics
+```{r}
+summary(cam_days$CamDays)
+```
+So total effort
+```{r}
+total_cam_days<-sum(cam_days$CamDays)
+total_cam_days
+```
+Now get camera days per round.
+```{r}
+effort_per_round<-cam_days %>% group_by(round) %>% summarize(
+        total_cam_days = sum(CamDays, na.rm = T),
+        avg_cam_days = mean(CamDays, na.rm = T),
+        sd_cam_days = sd(CamDays, na.rm = T)
+)
+```
+#### Now try with CTFWR code
+Need to get some column names rearranged.  Function requires variables Sampling.Event, End.Date, Start.Date, Sampling.Unit.Name and the dates all need to be in posixCT format.
+Make a DF to use
+```{r}
+CTFWR<-masterDF %>% select(Sampling.Unit.Name, Sampling.Year, Date_Out, Use_End_Date)
+```
+Now rename columns
+```{r}
+names(CTFWR)<- c("Sampling.Unit.Name", "Sampling.Event", "Start.Date", "End.Date")
+```
+And fix date formats
+```{r}
+CTFWR$Start.Date<-as.POSIXct(CTFWR$Start.Date)
+CTFWR$End.Date<-as.POSIXct(CTFWR$End.Date)
+```
+Now run the function
+```{r}
+test<-cam.days(CTFWR, "19_20")
+```
+Why do I get 77 instead of 74?
+Let's take a look using the compareDF package. Also need the htmlTable package.
+```{r}
+library(compareDF)
+library(htmlTable)
+test1<-cam_days
+#now get matching columns to test
+test1<-test1 %>% select(Sampling.Unit.Name, Date_Out, Use_End_Date, CamDays)
+#fix names
+names(test1)<-c("Sampling.Unit.Name", "Start.Date", "End.Date", "ndays")
+#and fix date formats
+test1$Start.Date<-as.POSIXct(test1$Start.Date)
+test1$End.Date<-as.POSIXct(test1$End.Date)
+test1<-as.data.frame(test1)
+#now compare
+ctable_test<-compare_df(test1, test, c("Sampling.Unit.Name"))
+ctable_test$comparison_table_diff
+```
+Turns out that there are three cameras that were used with the same sd cards in different deployments, so when we ran unique(Sampling.Unit.Name) the second deployments were not captured. So the correct assessment is the one that was done with the WildID function.  Perhaps we should add round number to the Sampling.Unit.Name code.
+
+
+
+
+
+
+
+
+
+Change "Date_Out" and "Use_End_Date" columns to character variables and reformat the dates.
+```{r}
+dfPrep$Use_End_Date<-format(dfPrep$Use_End_Date, "%m/%d/%Y")
+dfPrep$Date_Out<-format(dfPrep$Date_Out, "%m/%d/%Y")
+```
+
+
+
 
 Calculate camera trap nights
 ```{r}
@@ -45,35 +211,14 @@ masterDF$Use_End_Date<-mdy(masterDF$Use_End_Date)
 masterDF$Camera_Trap_Days<- difftime(masterDF$Use_End_Date, masterDF$Date_Out , units = c("days"))
 ```
 
-Need to bring in photo date and time. This will come from the exif data gathered from the photo metadata. Need to merge these files. 
-```{r}
-New<-select(masterDF, "subject_ids", "diff_species", "choice", "Imj1", "CamNum", "SD_card_num", "ForestType", "ForestName", "Date_Out", "Use_End_Date", "Camera_Trap_Days", "round")
-```
-
-Now we need to bring in the photo dates, because the functions we are using come from the Wild.ID format "Chapter 5" business. They require photo date and time, which we will distinguish as "td.photo", "Photo.Date", and "Photo.Time". To get photo date and time, you have to generate a csv file of all of the images you uploaded to Zooniverse. Use the Terminal to generate a csv of the photo metadata and there should be a column titled "DateTimeOriginal". From that output csv, you only need the columns "FileName" and "DateTimeOriginal". Now we can join the photo dates and times to our masterDF
-```{r}
-PhotoDatesTimes <- read_csv("/Users/ebar/Dropbox/R/Zooniverse_work/Kate/data/PhotoDatesTimes.csv") #This is the df generated from the Terminal and then cut down to have just the necessary columns.
-
-#Need to carry round # over with you when you join!
-dfPrep<-left_join(New, PhotoDatesTimes, by=c("Imj1"="FileName", "round"="Round"), type='right', match='all')
-
-```
-
-Separate out photo dates and times into different columns. Maintain one column with both dates and times together. 
-```{r}
-dfPrep$Photo.Time <- format(as.POSIXct(dfPrep$DateTimeOriginal,format="%Y:%m:%d %H:%M:%S"),"%H:%M:%S")
-
-dfPrep$Photo.Date <- format(as.POSIXct(dfPrep$DateTimeOriginal,format="%Y:%m:%d %H:%M:%S"),"%m/%d/%Y")
-```
-
-Change "Date_Out" and "Use_End_Date" columns to character variables and reformat the dates.
-```{r}
-dfPrep$Use_End_Date<-format(dfPrep$Use_End_Date, "%m/%d/%Y")
-dfPrep$Date_Out<-format(dfPrep$Date_Out, "%m/%d/%Y")
-```
 
 
-Change the names of the columns to match that which Wild.ID requires. 
+
+
+
+
+
+
 ```{r}
 SpeciesAcc<-select(dfPrep, "subject_ids", "Imj1", "DateTimeOriginal", "Camera_Trap_Days", "Date_Out", "Use_End_Date", "choice", "Photo.Date", "Photo.Time", "Photo.Date","round")
 names(SpeciesAcc)<- c("Sampling.Unit.Name", "Event", "td.photo", "ndays", "Start.Date", "End.Date", "bin", "Photo.Date", "Photo.Time", "round")
