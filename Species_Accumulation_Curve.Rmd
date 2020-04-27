@@ -20,6 +20,7 @@ library(vegan) #ecological analysis
 library(plotrix) #visualize circular data
 library(ggplot2) #producing graphics
 library(maptools) #produce maps using GIS layers
+library(stringr) #helps in manipulating string vars
 ```
 
 Import the masterDF
@@ -47,16 +48,19 @@ all_species
 num_species<-length(all_species)
 ```
 
-Add a column to identify each camera trap actual camera trap by extracting the camera trap, card number and forest information from each image name.
+Add a column to identify each camera trap actual camera trap by extracting the camera trap, card number and forest information from each image name.Then paste that to round number.
 Requires package `stringr`
 
 ```{r}
-library(stringr)
-masterDF$Sampling.Unit.Name<-str_sub(masterDF$Imj1, start = 1, end = 9) #use 9 because some forests have a 3 letter rather than 2 letter code.
+#requires stringr
+Sampling.Unit.Name<-str_sub(masterDF$Imj1, start = 1, end = 9) #use 9 because some forests have a 3 letter rather than 2 letter code.
+#now paste to round number
+masterDF$Sampling.Unit.Name<-paste0(Sampling.Unit.Name, masterDF$round)
+
 ```
 Now add a sampling year (the whole data set). We can think of sampling event as equal to round.
 ```{r}
-masterDF$Sampling.Year<-"19_20"
+masterDF$Sampling.Year<-19.20
 ```
 Let's check how many camera traps we have records for in the database using Sampling.Unit.Name
 ```{r}
@@ -94,21 +98,13 @@ Let's look at start dates/times
 ```{r}
 unique(masterDF$Date_Out)
 ```
-Notice a couple of typos: 2008-02-07 should be 2019-02-07. Fix that.
-
-```{r}
-fix_dates<-which(masterDF$Date_Out == "2008-02-07")
-masterDF$Date_Out[fix_dates]<-"2019-02-07"
-unique(masterDF$Date_Out)
-```
-
 
 ### Deriving sampling effort, events and species list.
 Section 5.5.3 of CTFWR.
 
 Survey effort is measured as camera days.
 
-Try with own code first, then CTFWR code.
+Try with own code first.
 
 Select just the first row of each camera deplyment from masterDF.
 ```{r}
@@ -124,7 +120,7 @@ Now calculate camera days.
 cam_days$CamDays<- (int_length(interval(cam_days$Date_Out, cam_days$Use_End_Date)))/86400
 ```
 
-Now let's visual camera days
+Now let's visualize camera days
 ```{r}
 ggplot(cam_days, aes(CamDays))+
         geom_histogram()
@@ -145,129 +141,175 @@ effort_per_round<-cam_days %>% group_by(round) %>% summarize(
         avg_cam_days = mean(CamDays, na.rm = T),
         sd_cam_days = sd(CamDays, na.rm = T)
 )
+
+#math check. Does the sum of effort_per_round$total_cam_days equal the total_cam_days summed above?
+
+sum(effort_per_round$total_cam_days)
+#Yes!
 ```
 #### Now try with CTFWR code
+This gives different answers when I run it different times, which makes me suspect.  I'm going to use our code (above) for calculating camera effort.
+
 Need to get some column names rearranged.  Function requires variables Sampling.Event, End.Date, Start.Date, Sampling.Unit.Name and the dates all need to be in posixCT format.
 Make a DF to use
 ```{r}
-CTFWR<-masterDF %>% select(Sampling.Unit.Name, Sampling.Year, Date_Out, Use_End_Date)
+# CTFWR<-masterDF %>% select(Sampling.Unit.Name, Sampling.Year, Date_Out, Use_End_Date)
 ```
 Now rename columns
 ```{r}
-names(CTFWR)<- c("Sampling.Unit.Name", "Sampling.Event", "Start.Date", "End.Date")
+# names(CTFWR)<- c("Sampling.Unit.Name", "Sampling.Event", "Start.Date", "End.Date")
 ```
 And fix date formats
 ```{r}
-CTFWR$Start.Date<-as.POSIXct(CTFWR$Start.Date)
-CTFWR$End.Date<-as.POSIXct(CTFWR$End.Date)
+# CTFWR$Start.Date<-as.POSIXct(CTFWR$Start.Date)
+# CTFWR$End.Date<-as.POSIXct(CTFWR$End.Date)
 ```
 Now run the function
 ```{r}
-test<-cam.days(CTFWR, "19_20")
+# test<-cam.days(CTFWR, "19_20")
 ```
 Why do I get 77 instead of 74?
 Let's take a look using the compareDF package. Also need the htmlTable package.
+
+The second time I ran this, I got 75 instead of 74 (and not 77!). What gives? It is not that I needed to add round number to the Sampling.Unit.Name because I did that in the second pass.
 ```{r}
-library(compareDF)
-library(htmlTable)
-test1<-cam_days
-#now get matching columns to test
-test1<-test1 %>% select(Sampling.Unit.Name, Date_Out, Use_End_Date, CamDays)
-#fix names
-names(test1)<-c("Sampling.Unit.Name", "Start.Date", "End.Date", "ndays")
-#and fix date formats
-test1$Start.Date<-as.POSIXct(test1$Start.Date)
-test1$End.Date<-as.POSIXct(test1$End.Date)
-test1<-as.data.frame(test1)
-#now compare
-ctable_test<-compare_df(test1, test, c("Sampling.Unit.Name"))
-ctable_test$comparison_table_diff
+# library(compareDF)
+# library(htmlTable)
+# test1<-cam_days
+# #now get matching columns to test
+# test1<-test1 %>% select(Sampling.Unit.Name, Date_Out, Use_End_Date, CamDays)
+# #fix names
+# names(test1)<-c("Sampling.Unit.Name", "Start.Date", "End.Date", "ndays")
+# #and fix date formats
+# test1$Start.Date<-as.POSIXct(test1$Start.Date)
+# test1$End.Date<-as.POSIXct(test1$End.Date)
+# test1<-as.data.frame(test1)
+# #now compare
+# ctable_test<-compare_df(test1, test, c("Sampling.Unit.Name"))
+# ctable_test$comparison_table_diff
 ```
 Turns out that there are three cameras that were used with the same sd cards in different deployments, so when we ran unique(Sampling.Unit.Name) the second deployments were not captured. So the correct assessment is the one that was done with the WildID function.  Perhaps we should add round number to the Sampling.Unit.Name code.
 
+The note above I fixed in the second round of running this code and I still see an issue when I run compare_df with camera 31_03_Wh3.  Not sure what the problem is, so I'm just going to keep using my own code.
 
+#### Events per time
+Derive, for each species and camera trap station, the trapping events according to desired time-interval sets.  The CTFWR has a function, event.sp that does this. Let's give it a whirl.To do so, we need to rename the columns in masterDF to match those in CTFWR `data` object.
 
-
-
-
-
-
-
-Change "Date_Out" and "Use_End_Date" columns to character variables and reformat the dates.
 ```{r}
-dfPrep$Use_End_Date<-format(dfPrep$Use_End_Date, "%m/%d/%Y")
-dfPrep$Date_Out<-format(dfPrep$Date_Out, "%m/%d/%Y")
+CTFWR<-masterDF
+names(CTFWR)
+```
+Reassign names to match CTFWR key columns
+
+```{r}
+newnames<-c("subject_ids", "diff_species", "choice", "Imj1", "Imj2", "Img3", "CamNum", "SD_card_num", "ForestType", "ForestName", "round", "Camera.Start.Date.and.Time", "Date_Checked", "Camera.End.Date.and.Time", "Sampling.Unit.Name", "Sampling.Event", "td.photo", "Photo.Time", "Photo.Date")
+
+names(CTFWR)<- newnames
+```
+
+```{r}
+events_hh<-event.sp(dtaframe = CTFWR, year = 19.20, thresh = 60)
+```
+Not working, and also not critical, so come back to CTFWR chapter 5. p. 56 later.
+
+
+### Species Accumulation
+The CTFWR code calls their function `acc.curve` which in turn calls their function `f.matrix.creator` and also some `vegan` functions. I'm going to try and step through it without the functions, just running the code.
+
+```{r}
+library(reshape)
+library(vegan)
+```
+Now step into their `acc.curve` function:
+
+```{r}
+yr<-masterDF
+```
+Next step into `f.matrix.creator` as part of `acc.curve`
+
+```{r}
+res<-list() #create results object
+#list sampling units
+cams<-unique(masterDF$Sampling.Unit.Name)
+cams<-sort(cams)
+rows<-length(cams)
+#start and end dates of sampling periods
+min<-min(masterDF$Date_Out)
+max<-max(masterDF$Use_End_Date)
+cols<-max-min+1
+
+#sampling period
+date.header<-seq(from = min, to = max, by = 1)
+mat<-matrix(NA, rows, cols, dimnames = list(cams, as.character(date.header)))
+#produced empty matrix with a row for each camera and a column for each date from the date the first camera was out to the date the last camera was brought in.
+
+#for all cameras, determine the open and close date and mark in the matrix
+
+
+
+start.dates<-tapply(as.character(masterDF$Date_Out), masterDF$Sampling.Unit.Name, unique)
+
+new.start.dates<-integer(0)
+class(new.start.dates)<-"Date"
+
+for(z in 1:length(start.dates)){
+  new.start.dates[z]<- start.dates[[z]]
+}
+start.dates<-new.start.dates
+
+
+end.dates<-tapply(as.character(masterDF$Use_End_Date), masterDF$Sampling.Unit.Name, unique)
+new.end.dates<-integer(0)
+class(new.end.dates)<-"Date"
+
+for (z in 1:length(end.dates)){
+  new.end.dates[z]<-end.dates[[z]]
+}
+end.dates<-new.end.dates
+
+#outline the sampling periods for each camera j
+for(j in 1:length(start.dates)){
+  #for each camera beginning and end of sampling
+  low<-which(date.header == start.dates[j])
+  hi<-which(date.header == end.dates[j])
+  indx<-seq(from = low, to = hi)
+  mat[j,indx]<-0
+}
+
+mat.template<-mat
+  #get the species
+species<-unique(masterDF$choice)
+#construct the matrix for each species, i
+for(i in 1:length(species)){
+  indx<-which(masterDF$choice == species[i])
+  #dates and cameras when/where the species was photographed
+  dates<-masterDF$Photo.Date[indx]
+  cameras<-masterDF$Sampling.Unit.Name[indx]
+  dates.cameras<-data.frame(dates, cameras)
+  #unique combination of dates and cameras
+  dates.cameras<-unique(dates.cameras)
+  #convert the date column in dates.cameras to date
+  dates.cameras$dates<-mdy(dates.cameras$dates)
+  
+  #fill in the matrix
+  for(j in 1:length(dates.cameras[,1])){
+    col<-which(date.header == dates.cameras[j,1])
+    row<-which(cams == dates.cameras[j,2])
+    mat[row,col]<-1
+  }
+  res<-c(res, list(mat))
+  #return the matrix to its original form
+  mat<-mat.template
+}
+names(res)<-species
+```
+Ok, that took care of the `f.matrix.creator` step inside of `acc.curve`.  Keep going.
+```{r}
+pr<-melt(mat)
+colnames(pr)<-c("Sampling.Unit.Name", "Date", "value", "species")
 ```
 
 
 
 
-Calculate camera trap nights
-```{r}
-masterDF$Date_Out<- mdy(masterDF$Date_Out)
-masterDF$Use_End_Date<-mdy(masterDF$Use_End_Date)
 
-
-masterDF$Camera_Trap_Days<- difftime(masterDF$Use_End_Date, masterDF$Date_Out , units = c("days"))
-```
-
-
-
-
-
-
-
-
-
-```{r}
-SpeciesAcc<-select(dfPrep, "subject_ids", "Imj1", "DateTimeOriginal", "Camera_Trap_Days", "Date_Out", "Use_End_Date", "choice", "Photo.Date", "Photo.Time", "Photo.Date","round")
-names(SpeciesAcc)<- c("Sampling.Unit.Name", "Event", "td.photo", "ndays", "Start.Date", "End.Date", "bin", "Photo.Date", "Photo.Time", "round")
-```
-
-
-Subset the data by season and add in sampling event number based on round.
-```{r}
-SpeciesAccWinter<-SpeciesAcc %>% group_by(round) %>% filter(round==1)
-SpeciesAccSpring<- SpeciesAcc %>% group_by(round) %>% filter(round==2)
-SpeciesAccSummer<- SpeciesAcc %>% group_by(round) %>% filter(round==3)
-SpeciesAccFall<-SpeciesAcc %>% group_by(round) %>% filter(round==4)
-```
-
-
-Add a column called "Sampling.Event" filled with 2020.1
-```{r}
-SpeciesAccWinter$Sampling.Event<-2020.1
-SpeciesAccSpring$Sampling.Event<-2020.2
-SpeciesAccSummer$Sampling.Event<-2020.3
-SpeciesAccFall$Sampling.Event<-2020.4
-```
-
-Get rid of the "round" column to match Wild.ID formatting
-```{r}
-SpeciesAccWinter<- SpeciesAccWinter[,-(10)]
-SpeciesAccSpring<- SpeciesAccSpring[,-(10)]
-SpeciesAccSummer<- SpeciesAccSummer[,-(10)]
-SpeciesAccFall<- SpeciesAccFall[,-(10)]
-```
-
-
-Species Accumulation
-```{r}
-
-accumulation<-acc.curve(masterDF, 2019.01)
-accumulation<-acc.curve(SpeciesAcc, 2020.1)
-accumulationWinter<-acc.curve(SpeciesAccWinter, 2020.1)
- #CODE CRASHES HERE
-```
-
-Plot Species Accumulation Curve
-```{r}
-ggplot(accumulation, aes(x=Camera.trap.days, y=species)) +
-     geom_line(aes(y=species-sd), colour = "grey50", linetype= "dotted")+
-     geom_line(aes(y=species+sd), colour = "grey50", linetype= "dotted")+
-     geom_line() + ylab("Number of Species") + xlab("Camera Trap Days") +
-     theme_bw()+ geom_hline(yintercept = 17, color = "red")
-
-
-ggsave("Species_Accumulation.JPG", device = "jpg")
-```
